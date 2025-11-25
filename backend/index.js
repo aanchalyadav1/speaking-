@@ -12,30 +12,62 @@ import { initFirestore } from './utils/firestore.js';
 dotenv.config();
 
 const app = express();
+
+/* ------------------- FIX: CONTENT SECURITY POLICY ------------------- */
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    `
+      default-src * 'unsafe-inline' 'unsafe-eval' blob: data:;
+      font-src https://fonts.gstatic.com data:;
+      style-src https://fonts.googleapis.com 'unsafe-inline' data:;
+      img-src https://res.cloudinary.com data: blob: *;
+      media-src blob: data: https://res.cloudinary.com;
+      script-src * 'unsafe-inline' 'unsafe-eval';
+      connect-src *;
+    `.replace(/\s+/g, ' ')
+  );
+  next();
+});
+/* ------------------------------------------------------------------- */
+
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 app.use(fileUpload({ useTempFiles: true, tempFileDir: '/tmp/' }));
 
+/* -------------------- FIREBASE ADMIN INIT -------------------- */
 if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64) {
   try {
-    const sa = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64, 'base64').toString('utf8');
-    admin.initializeApp({ credential: admin.credential.cert(JSON.parse(sa)) });
+    const sa = Buffer.from(
+      process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64,
+      'base64'
+    ).toString('utf8');
+
+    admin.initializeApp({
+      credential: admin.credential.cert(JSON.parse(sa)),
+    });
+
     console.log('Firebase admin initialized.');
   } catch (e) {
     console.error('Firebase admin init failed:', e.message);
   }
 } else {
-  console.warn('FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 not set; protected routes will fail.');
+  console.warn(
+    'FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 not set; protected routes will fail.'
+  );
 }
+/* ------------------------------------------------------------- */
 
 await initFirestore();
 
+/* ----------------------- ROUTES ----------------------- */
 app.use('/api/upload', uploadRoute);
 app.use('/api/generate', generateRoute);
 app.use('/api/tts', ttsRoute);
 app.use('/api/admin', adminRoute);
 
 app.use('/static', express.static('backend/uploads'));
+/* ------------------------------------------------------ */
 
 const PORT = Number(process.env.PORT || 4000);
 app.listen(PORT, () => console.log(`Backend listening on ${PORT}`));
