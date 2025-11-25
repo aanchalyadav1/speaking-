@@ -1,14 +1,16 @@
 // src/components/Auth.jsx
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { auth, googleProvider } from '../utils/firebase.js';
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import {
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+} from 'firebase/auth';
 
 export default function Auth({ onAuthenticated }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
   // Google Sign-In
   const googleLogin = async () => {
@@ -17,7 +19,6 @@ export default function Auth({ onAuthenticated }) {
       const res = await signInWithPopup(auth, googleProvider);
       const token = await res.user.getIdToken();
       onAuthenticated({ user: res.user, token });
-      navigate('/test'); // redirect to test page after login
     } catch (error) {
       console.error('Google login error:', error);
       alert(error.message);
@@ -33,7 +34,6 @@ export default function Auth({ onAuthenticated }) {
       const res = await signInWithEmailAndPassword(auth, email, pw);
       const token = await res.user.getIdToken();
       onAuthenticated({ user: res.user, token });
-      navigate('/test');
     } catch (error) {
       console.error('Email login error:', error);
       alert(error.message);
@@ -49,7 +49,6 @@ export default function Auth({ onAuthenticated }) {
       const res = await createUserWithEmailAndPassword(auth, email, pw);
       const token = await res.user.getIdToken();
       onAuthenticated({ user: res.user, token });
-      navigate('/test');
     } catch (error) {
       console.error('Sign-up error:', error);
       alert(error.message);
