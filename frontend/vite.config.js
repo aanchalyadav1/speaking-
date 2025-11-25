@@ -4,9 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: 'dist'  // Render expects this folder to serve static files
+    outDir: 'dist',
   },
-  server: {
-    port: 5173
-  }
+  base: '/', // Important for production deploy
 });
