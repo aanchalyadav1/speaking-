@@ -10,10 +10,9 @@ import adminRoute from './routes/admin.js';
 import { initFirestore } from './utils/firestore.js';
 
 dotenv.config();
-
 const app = express();
 
-/* ------------------- FIX: CONTENT SECURITY POLICY ------------------- */
+/* ------------------- CSP HEADERS ------------------- */
 app.use((req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
@@ -29,13 +28,14 @@ app.use((req, res, next) => {
   );
   next();
 });
-/* ------------------------------------------------------------------- */
+/* -------------------------------------------------- */
 
+/* ------------------- CORS ------------------- */
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 app.use(fileUpload({ useTempFiles: true, tempFileDir: '/tmp/' }));
 
-/* -------------------- FIREBASE ADMIN INIT -------------------- */
+/* -------------------- FIREBASE ADMIN -------------------- */
 if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64) {
   try {
     const sa = Buffer.from(
@@ -58,16 +58,23 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64) {
 }
 /* ------------------------------------------------------------- */
 
+/* -------------------- INIT FIRESTORE -------------------- */
 await initFirestore();
 
-/* ----------------------- ROUTES ----------------------- */
+/* -------------------- API ROUTES -------------------- */
 app.use('/api/upload', uploadRoute);
 app.use('/api/generate', generateRoute);
 app.use('/api/tts', ttsRoute);
 app.use('/api/admin', adminRoute);
 
-app.use('/static', express.static('backend/uploads'));
-/* ------------------------------------------------------ */
+/* -------------------- STATIC UPLOADS -------------------- */
+app.use('/static', express.static('uploads'));
 
+/* -------------------- HEALTH CHECK -------------------- */
+app.get('/', (req, res) => {
+  res.send('🎤 Speaking Test Backend is running. Use /api routes.');
+});
+
+/* -------------------- START SERVER -------------------- */
 const PORT = Number(process.env.PORT || 4000);
-app.listen(PORT, () => console.log(`Backend listening on ${PORT}`));
+app.listen(PORT, () => console.log(`Backend API listening on ${PORT}`));
