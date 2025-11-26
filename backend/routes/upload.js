@@ -1,124 +1,48 @@
-import express from "express";
-import cloudinary from "../utils/cloudinary.js";
-import fs from "fs";
-import { openai } from "../utils/openai.js";
-import { verifyFirebaseToken } from "./middlewares.js";
-import admin from "firebase-admin";
+import { Router } from "express";
+import multer from "multer";
+import { bucket } from "../firebase.js";
+import { v4 as uuidv4 } from "uuid";
 
-const router = express.Router();
+const router = Router();
 
-// ---------------- FIREBASE INIT (ONLY ONCE) ------------------
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(
-      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-    ),
-  });
-}
-const db = admin.firestore();
+// Temporary file handler (keeps in memory)
+const upload = multer({ storage: multer.memoryStorage() });
 
-// ---------------- PROMPT BUILDER ------------------
-function buildBandPrompt(transcript, taskContext = {}) {
-  return `
-You are an experienced IELTS examiner. 
-Return STRICT JSON only in this format:
-
-{
-  "fluency": <0-9>,
-  "grammar": <0-9>,
-  "vocabulary": <0-9>,
-  "pronunciation": <0-9>,
-  "overall_band": <0-9>,
-  "advice": "short advice"
-}
-
-Transcript: "${transcript.replace(/\n/g, " ")}"
-Task context: ${JSON.stringify(taskContext)}
-Return ONLY JSON.
-`;
-}
-
-// ---------------- MAIN UPLOAD ROUTE ------------------
-router.post("/", verifyFirebaseToken, async (req, res) => {
+router.post("/", upload.single("file"), async (req, res) => {
   try {
-    if (!req.files || !req.files.audio) {
-      return res.status(400).json({ error: "No audio file" });
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const audio = req.files.audio;
+    const file = req.file;
+    const filename = `${Date.now()}_${file.originalname}`;
+    const blob = bucket.file(filename);
 
-    // ---------------- CLOUDINARY UPLOAD (NO RE-DOWNLOAD) ------------------
-    const upload = await cloudinary.uploader.upload(audio.tempFilePath, {
-      resource_type: "video",
-      folder: "speaking_test",
+    const blobStream = blob.createWriteStream({
+      metadata: {
+        contentType: file.mimetype,
+        metadata: { firebaseStorageDownloadTokens: uuidv4() },
+      },
     });
 
-    const audioUrl = upload.secure_url;
-
-    // ---------------- DIRECT WHISPER TRANSCRIPTION ------------------
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(audio.tempFilePath),
-      model: "gpt-4o-transcribe",
+    blobStream.on("error", (err) => {
+      console.error("🔥 Upload error:", err);
+      return res.status(500).json({ error: "Upload failed" });
     });
 
-    const transcript = transcription.text || "";
+    blobStream.on("finish", () => {
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
+        filename
+      )}?alt=media`;
 
-    // ---------------- GPT EVALUATION ------------------
-    const taskContext = req.body.taskContextJson
-      ? JSON.parse(req.body.taskContextJson)
-      : {};
-
-    const prompt = buildBandPrompt(transcript, taskContext);
-
-    const evalResp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are an IELTS examiner." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 300,
+      res.status(200).json({ url: publicUrl });
     });
 
-    let analysisText = evalResp.choices[0].message.content;
-    let analysisJSON;
+    blobStream.end(file.buffer);
 
-    try {
-      analysisJSON = JSON.parse(
-        analysisText.slice(analysisText.indexOf("{"))
-      );
-    } catch {
-      analysisJSON = { raw: analysisText };
-    }
-
-    const overall =
-      analysisJSON.overall_band ||
-      (analysisJSON.fluency +
-        analysisJSON.grammar +
-        analysisJSON.vocabulary +
-        analysisJSON.pronunciation) /
-        4;
-
-    // ---------------- SAVE TO FIRESTORE ------------------
-    await db.collection("tests").add({
-      user_id: req.user.uid,
-      task_index: Number(req.body.taskIndex || 0),
-      audio_url: audioUrl,
-      transcript,
-      analysis: analysisJSON,
-      overall,
-      created_at: new Date(),
-    });
-
-    return res.json({
-      transcript,
-      analysis: analysisJSON,
-      overall,
-      audioUrl,
-    });
-  } catch (e) {
-    console.error("Upload handler error:", e);
-    res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error("🔥 Unexpected error:", err);
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 
