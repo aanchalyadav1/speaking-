@@ -1,36 +1,73 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 
-export default function AudioRecorder({ onSave, maxDuration=60 }){
-  const [recording,setRecording]=useState(false);
-  const [sec,setSec]=useState(0);
-  const mr = useRef(null);
+export default function AudioRecorder({ onSave, maxDuration = 60, startRecordingTrigger }) {
+  const [recording, setRecording] = useState(false);
+  const [sec, setSec] = useState(0);
+  const mediaRecorder = useRef(null);
   const chunks = useRef([]);
+  const intervalId = useRef(null);
 
-  async function start(){
-    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-    const media = new MediaRecorder(stream);
-    mr.current = media;
+  // Start recording when trigger changes
+  useEffect(() => {
+    if (startRecordingTrigger) startRecording();
+    // eslint-disable-next-line
+  }, [startRecordingTrigger]);
+
+  const startRecording = async () => {
+    if (recording) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mr = new MediaRecorder(stream);
+    mediaRecorder.current = mr;
     chunks.current = [];
-    media.ondataavailable = e => chunks.current.push(e.data);
-    media.onstop = () => {
+
+    mr.ondataavailable = e => chunks.current.push(e.data);
+    mr.onstop = async () => {
+      clearInterval(intervalId.current);
+      setRecording(false);
       const blob = new Blob(chunks.current, { type: 'audio/webm' });
-      onSave(blob);
+      await onSave(blob);
+      setSec(0);
     };
-    media.start();
+
+    mr.start();
     setRecording(true);
     setSec(0);
-    const id = setInterval(()=>{ setSec(s=>{ if(s+1>=maxDuration){ if(mr.current && mr.current.state==='recording') mr.current.stop(); clearInterval(id); setRecording(false); } return s+1; }) },1000);
-  }
 
-  function stop(){ if(mr.current && mr.current.state==='recording') mr.current.stop(); setRecording(false); }
+    intervalId.current = setInterval(() => {
+      setSec(prev => {
+        if (prev + 1 >= maxDuration) {
+          stopRecording();
+        }
+        return prev + 1;
+      });
+    }, 1000);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
+      mediaRecorder.current.stop();
+    }
+  };
+
+  // Cleanup interval on unmount
+  useEffect(() => () => clearInterval(intervalId.current), []);
 
   return (
     <div className="card">
-      <div style={{display:'flex',gap:12,alignItems:'center'}}>
-        <button onClick={recording?stop:start} style={{padding:'8px 12px', borderRadius:8, background: recording ? '#ef4444' : '#10b981', color:'#fff'}}>{recording ? 'Stop' : 'Record'}</button>
-        <div>Time: {sec}s</div>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button
+          onClick={recording ? stopRecording : startRecording}
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: recording ? '#ef4444' : '#10b981',
+            color: '#fff',
+          }}
+        >
+          {recording ? 'Stop' : 'Record'}
+        </button>
+        <div>Time: {sec}s / {maxDuration}s</div>
       </div>
-      <div style={{marginTop:8,fontSize:12,color:'#cbd5e1'}}>Max {maxDuration}s</div>
     </div>
   );
 }
