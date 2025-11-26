@@ -4,9 +4,7 @@ import React, { useEffect, useState } from 'react';
 export default function CircularTimer({ duration = 30, isActive = false, onExpire = ()=>{}, size=72, stroke=6 }) {
   const [timeLeft, setTimeLeft] = useState(duration);
 
-  useEffect(() => {
-    setTimeLeft(duration);
-  }, [duration]);
+  useEffect(()=> setTimeLeft(duration), [duration]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -25,8 +23,7 @@ export default function CircularTimer({ duration = 30, isActive = false, onExpir
 
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progress = (timeLeft / duration) * circumference;
-  const pct = Math.round((timeLeft / duration) * 100);
+  const offset = circumference - (timeLeft / duration) * circumference;
 
   return (
     <div style={{display:'inline-flex', alignItems:'center', gap:10}}>
@@ -46,7 +43,7 @@ export default function CircularTimer({ duration = 30, isActive = false, onExpir
             strokeLinecap="round"
             fill="transparent"
             strokeDasharray={`${circumference} ${circumference}`}
-            strokeDashoffset={circumference - progress}
+            strokeDashoffset={offset}
             style={{ transition: 'stroke-dashoffset 0.9s linear' }}
             transform="rotate(-90)"
           />
@@ -54,7 +51,7 @@ export default function CircularTimer({ duration = 30, isActive = false, onExpir
       </svg>
       <div style={{textAlign:'left'}}>
         <div style={{fontSize:14,fontWeight:700}}>{timeLeft}s</div>
-        <div style={{fontSize:12,color:'#94a3b8'}}>{pct}%</div>
+        <div style={{fontSize:12,color:'#94a3b8'}}>{Math.round((timeLeft/duration)*100)}%</div>
       </div>
     </div>
   );
