@@ -1,3 +1,4 @@
+// backend/routes/upload.js
 import express from 'express';
 import cloudinary from '../utils/cloudinary.js';
 import fetch from 'node-fetch';
@@ -8,8 +9,12 @@ import { verifyFirebaseToken } from './middlewares.js';
 
 const router = express.Router();
 
-async function downloadToTemp(url){
+/**
+ * Download remote file to backend/uploads and return local path.
+ */
+async function downloadToTemp(url) {
   const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download audio (${res.status})`);
   const buffer = Buffer.from(await res.arrayBuffer());
   const tmp = path.join(process.cwd(), 'backend', 'uploads');
   if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
@@ -18,26 +23,51 @@ async function downloadToTemp(url){
   return fname;
 }
 
-function buildBandPrompt(transcript, taskContext=''){
-  return `You are an experienced IELTS examiner. Evaluate the following spoken response and return a JSON object exactly in this format:   {"fluency": <0-9 float>, "grammar": <0-9 float>, "vocabulary": <0-9 float>, "pronunciation": <0-9 float>, "overall_band": <0-9 float>, "advice": "brief advice"}   Transcript: "${transcript.replace(/\n/g,' ')}"   Task context: ${JSON.stringify(taskContext)}   Return only valid JSON.`;
+/**
+ * Prompt builder: strict instruction to return only valid JSON.
+ */
+function buildBandPrompt(transcript, taskContext = '') {
+  return `You are an experienced IELTS examiner. Evaluate the following spoken response and return a JSON object exactly in this format:
+
+{
+  "fluency": <0-9 float>,
+  "grammar": <0-9 float>,
+  "vocabulary": <0-9 float>,
+  "pronunciation": <0-9 float>,
+  "overall_band": <0-9 float>,
+  "advice": "brief advice"
+}
+
+Transcript: "${transcript.replace(/\n/g, ' ')}"
+Task context: ${JSON.stringify(taskContext)}
+
+Return ONLY valid JSON (no explanation).`;
 }
 
 router.post('/', verifyFirebaseToken, async (req, res) => {
+  let tmpFile = null;
   try {
     if (!req.files || !req.files.audio) return res.status(400).json({ error: 'No audio file' });
     const audio = req.files.audio;
 
-    const upload = await cloudinary.uploader.upload(audio.tempFilePath, { resource_type: 'video', folder: 'speaking_test' });
+    // Upload to Cloudinary (video resource type to accept webm)
+    const upload = await cloudinary.uploader.upload(audio.tempFilePath, {
+      resource_type: 'video',
+      folder: 'speaking_test',
+    });
     const audioUrl = upload.secure_url;
 
-    const tmpFile = await downloadToTemp(audioUrl);
+    // Download to local temp for whisper
+    tmpFile = await downloadToTemp(audioUrl);
 
+    // Transcribe with Whisper
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(tmpFile),
-      model: 'whisper-1'
+      model: 'whisper-1',
     });
     const transcript = transcription.text || transcription.data?.text || '';
 
+    // Build prompt and call LLM for scoring
     const taskContext = req.body.taskContextJson ? JSON.parse(req.body.taskContextJson) : {};
     const prompt = buildBandPrompt(transcript, taskContext);
 
@@ -45,51 +75,62 @@ router.post('/', verifyFirebaseToken, async (req, res) => {
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are an expert English speaking examiner.' },
-        { role: 'user', content: prompt }
+        { role: 'user', content: prompt },
       ],
-      temperature: 0.0,
-      max_tokens: 450
+      temperature: 0,
+      max_tokens: 450,
     });
 
-    const analysisText = gptResp.data.choices[0].message.content;
+    // NEW SDK: read choices from root .choices
+    const analysisText = gptResp.choices?.[0]?.message?.content || '';
     let analysisJSON;
     try {
+      // try to slice at first { to be resilient to small prefixes
       const idx = analysisText.indexOf('{');
-      analysisJSON = JSON.parse(analysisText.slice(idx));
+      analysisJSON = idx >= 0 ? JSON.parse(analysisText.slice(idx)) : JSON.parse(analysisText);
     } catch (e) {
+      // If parsing fails, return raw text so frontend can show it
       analysisJSON = { raw: analysisText };
     }
 
-    const overall = analysisJSON.overall_band || (
-      (analysisJSON.fluency||0) +
-      (analysisJSON.grammar||0) +
-      (analysisJSON.vocabulary||0) +
-      (analysisJSON.pronunciation||0)
-    ) / 4;
+    // Compute overall_band if not present
+    const overall_band =
+      analysisJSON.overall_band ??
+      (((analysisJSON.fluency || 0) + (analysisJSON.grammar || 0) + (analysisJSON.vocabulary || 0) + (analysisJSON.pronunciation || 0)) / 4) ||
+      null;
 
+    // Save to Firestore (best-effort; do not fail the request if Firestore errors)
     try {
       const admin = await import('firebase-admin');
       const db = admin.firestore();
       await db.collection('tests').add({
-        user_id: req.user.uid,
+        user_id: req.user?.uid || null,
         task_index: Number(req.body.taskIndex || 0),
         audio_url: audioUrl,
         transcript,
         analysis: analysisJSON,
-        overall,
-        created_at: new Date()
+        overall_band,
+        created_at: new Date(),
       });
     } catch (e) {
-      console.warn('Firestore save failed', e.message);
+      console.warn('Firestore save failed:', e?.message || e);
     }
 
-    try { fs.unlinkSync(tmpFile); } catch(e){}
+    // Cleanup tmp
+    try { if (tmpFile && fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) {}
 
-    res.json({ transcript, analysis: analysisJSON, overall, audioUrl });
-
+    // Respond with normalized payload the frontend expects
+    res.json({
+      transcript,
+      analysis: analysisJSON,
+      overall_band,
+      audioUrl,
+    });
   } catch (e) {
-    console.error('Upload handler error', e.message);
-    res.status(500).json({ error: e.message });
+    console.error('Upload handler error:', e?.message || e);
+    // attempt cleanup
+    try { if (tmpFile && fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (ee) {}
+    res.status(500).json({ error: e?.message || String(e) });
   }
 });
 
