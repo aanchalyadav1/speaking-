@@ -1,73 +1,109 @@
-import React, { useRef, useState, useEffect } from 'react';
+// src/components/AudioRecorder.jsx
+import React, { useRef, useState } from "react";
 
-export default function AudioRecorder({ onSave, maxDuration = 60, startRecordingTrigger }) {
+export default function AudioRecorder({ onSave, maxDuration = 60, disabled }) {
   const [recording, setRecording] = useState(false);
   const [sec, setSec] = useState(0);
-  const mediaRecorder = useRef(null);
+  const mr = useRef(null);
   const chunks = useRef([]);
-  const intervalId = useRef(null);
+  const timerRef = useRef(null);
 
-  // Start recording when trigger changes
-  useEffect(() => {
-    if (startRecordingTrigger) startRecording();
-    // eslint-disable-next-line
-  }, [startRecordingTrigger]);
+  async function start() {
+    if (disabled) return alert("Please wait... uploading previous answer.");
 
-  const startRecording = async () => {
-    if (recording) return;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mr = new MediaRecorder(stream);
-    mediaRecorder.current = mr;
+    const media = new MediaRecorder(stream);
+    mr.current = media;
     chunks.current = [];
 
-    mr.ondataavailable = e => chunks.current.push(e.data);
-    mr.onstop = async () => {
-      clearInterval(intervalId.current);
-      setRecording(false);
-      const blob = new Blob(chunks.current, { type: 'audio/webm' });
-      await onSave(blob);
-      setSec(0);
+    media.ondataavailable = (e) => chunks.current.push(e.data);
+    media.onstop = () => {
+      clearInterval(timerRef.current);
+      const blob = new Blob(chunks.current, { type: "audio/webm" });
+      onSave(blob);
     };
 
-    mr.start();
+    media.start();
     setRecording(true);
     setSec(0);
 
-    intervalId.current = setInterval(() => {
-      setSec(prev => {
-        if (prev + 1 >= maxDuration) {
-          stopRecording();
+    timerRef.current = setInterval(() => {
+      setSec((s) => {
+        if (s + 1 >= maxDuration) {
+          stop();
+          return maxDuration;
         }
-        return prev + 1;
+        return s + 1;
       });
     }, 1000);
-  };
+  }
 
-  const stopRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
-      mediaRecorder.current.stop();
+  function stop() {
+    if (mr.current && mr.current.state === "recording") {
+      mr.current.stop();
     }
-  };
-
-  // Cleanup interval on unmount
-  useEffect(() => () => clearInterval(intervalId.current), []);
+    setRecording(false);
+  }
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         <button
-          onClick={recording ? stopRecording : startRecording}
+          onClick={recording ? stop : start}
+          disabled={disabled}
           style={{
-            padding: '8px 12px',
+            padding: "8px 12px",
             borderRadius: 8,
-            background: recording ? '#ef4444' : '#10b981',
-            color: '#fff',
+            background: recording ? "#ef4444" : disabled ? "#475569" : "#10b981",
+            color: "#fff",
+            cursor: disabled ? "not-allowed" : "pointer"
           }}
         >
-          {recording ? 'Stop' : 'Record'}
+          {recording ? "Stop" : "Record"}
         </button>
-        <div>Time: {sec}s / {maxDuration}s</div>
+
+        <div style={{ fontSize: 16, fontWeight: 600 }}>
+          Time: {sec}s / {maxDuration}s
+        </div>
       </div>
+
+      {recording && (
+        <div
+          style={{
+            marginTop: 10,
+            width: 140,
+            height: 20,
+            background: "#1e293b",
+            borderRadius: 8,
+            overflow: "hidden",
+            display: "flex"
+          }}
+        >
+          {/* simple waveform */}
+          {[...Array(12)].map((_, i) => (
+            <div
+              key={i}
+              style={{
+                width: 8,
+                marginRight: 2,
+                background: "#06b6d4",
+                animation: "wave 0.7s infinite",
+                animationDelay: `${i * 0.1}s`
+              }}
+            ></div>
+          ))}
+        </div>
+      )}
+
+      <style>
+        {`
+          @keyframes wave {
+            0% { height: 10px; }
+            50% { height: 20px; }
+            100% { height: 10px; }
+          }
+        `}
+      </style>
     </div>
   );
 }
