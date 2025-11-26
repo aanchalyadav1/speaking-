@@ -1,28 +1,23 @@
 import express from "express";
 import cloudinary from "../utils/cloudinary.js";
-import fetch from "node-fetch";
 import fs from "fs";
-import path from "path";
 import { openai } from "../utils/openai.js";
 import { verifyFirebaseToken } from "./middlewares.js";
 import admin from "firebase-admin";
 
 const router = express.Router();
 
-// ------------------------- TEMP DOWNLOAD -----------------------------------
-async function downloadToTemp(url) {
-  const res = await fetch(url);
-  const buffer = Buffer.from(await res.arrayBuffer());
-
-  const tmp = path.join(process.cwd(), "backend", "uploads");
-  if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
-
-  const fname = path.join(tmp, `dl_${Date.now()}.webm`);
-  fs.writeFileSync(fname, buffer);
-  return fname;
+// ---------------- FIREBASE INIT (ONLY ONCE) ------------------
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(
+      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+    ),
+  });
 }
+const db = admin.firestore();
 
-// -------------------------- PROMPT BUILDER -----------------------------------
+// ---------------- PROMPT BUILDER ------------------
 function buildBandPrompt(transcript, taskContext = {}) {
   return `
 You are an experienced IELTS examiner. 
@@ -40,20 +35,19 @@ Return STRICT JSON only in this format:
 Transcript: "${transcript.replace(/\n/g, " ")}"
 Task context: ${JSON.stringify(taskContext)}
 Return ONLY JSON.
-  `;
+`;
 }
 
-// ---------------------------- MAIN ROUTE -------------------------------------
+// ---------------- MAIN UPLOAD ROUTE ------------------
 router.post("/", verifyFirebaseToken, async (req, res) => {
   try {
-    // ------------------- FILE CHECK -------------------------
     if (!req.files || !req.files.audio) {
       return res.status(400).json({ error: "No audio file" });
     }
 
     const audio = req.files.audio;
 
-    // ------------------- UPLOAD TO CLOUDINARY -------------------------
+    // ---------------- CLOUDINARY UPLOAD (NO RE-DOWNLOAD) ------------------
     const upload = await cloudinary.uploader.upload(audio.tempFilePath, {
       resource_type: "video",
       folder: "speaking_test",
@@ -61,41 +55,39 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
 
     const audioUrl = upload.secure_url;
 
-    // ------------------- DOWNLOAD BACK FOR WHISPER -------------------------
-    const tmpFile = await downloadToTemp(audioUrl);
-
-    // ------------------- TRANSCRIPTION -------------------------
+    // ---------------- DIRECT WHISPER TRANSCRIPTION ------------------
     const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(tmpFile),
-      model: "whisper-1",
+      file: fs.createReadStream(audio.tempFilePath),
+      model: "gpt-4o-transcribe",
     });
 
     const transcript = transcription.text || "";
 
-    // ------------------- GPT EVALUATION -------------------------
+    // ---------------- GPT EVALUATION ------------------
     const taskContext = req.body.taskContextJson
       ? JSON.parse(req.body.taskContextJson)
       : {};
 
     const prompt = buildBandPrompt(transcript, taskContext);
 
-    const gptResp = await openai.chat.completions.create({
+    const evalResp = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "You are an expert IELTS examiner." },
+        { role: "system", content: "You are an IELTS examiner." },
         { role: "user", content: prompt },
       ],
       temperature: 0,
-      max_tokens: 400,
+      max_tokens: 300,
     });
 
-    const analysisText = gptResp.choices[0].message.content;
-
+    let analysisText = evalResp.choices[0].message.content;
     let analysisJSON;
+
     try {
-      const idx = analysisText.indexOf("{");
-      analysisJSON = JSON.parse(analysisText.slice(idx));
-    } catch (e) {
+      analysisJSON = JSON.parse(
+        analysisText.slice(analysisText.indexOf("{"))
+      );
+    } catch {
       analysisJSON = { raw: analysisText };
     }
 
@@ -107,17 +99,7 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
         analysisJSON.pronunciation) /
         4;
 
-    // ------------------- SAVE TO FIRESTORE -------------------------
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert(
-          JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-        ),
-      });
-    }
-
-    const db = admin.firestore();
-
+    // ---------------- SAVE TO FIRESTORE ------------------
     await db.collection("tests").add({
       user_id: req.user.uid,
       task_index: Number(req.body.taskIndex || 0),
@@ -127,11 +109,6 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
       overall,
       created_at: new Date(),
     });
-
-    // ------------------- CLEANUP -------------------------
-    try {
-      fs.unlinkSync(tmpFile);
-    } catch (e) {}
 
     return res.json({
       transcript,
