@@ -5,11 +5,11 @@ import { bucket } from "../firebase.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() }); // store in memory
+const upload = multer({ storage: multer.memoryStorage() });
 
-router.post("/", upload.single("audio"), async (req, res) => {
+router.post("/", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "Audio file is required" });
+    if (!req.file) return res.status(400).json({ error: "File is required" });
 
     const file = req.file;
     const filename = `${Date.now()}_${file.originalname}`;
@@ -17,14 +17,14 @@ router.post("/", upload.single("audio"), async (req, res) => {
 
     const blobStream = blob.createWriteStream({
       metadata: {
-        contentType: file.mimetype || "audio/webm",
+        contentType: file.mimetype,
         metadata: { firebaseStorageDownloadTokens: uuidv4() },
       },
     });
 
     blobStream.on("error", (err) => {
       console.error("🔥 Upload error:", err);
-      res.status(500).json({ error: "Firebase upload failed", details: err.message });
+      res.status(500).json({ error: "Upload failed" });
     });
 
     blobStream.on("finish", () => {
@@ -37,7 +37,7 @@ router.post("/", upload.single("audio"), async (req, res) => {
     blobStream.end(file.buffer);
   } catch (err) {
     console.error("🔥 Unexpected error:", err);
-    res.status(500).json({ error: "Unexpected server error", details: err.message });
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 
