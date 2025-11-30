@@ -1,38 +1,33 @@
 import admin from "firebase-admin";
 
-let app = null;
+let firebaseApp;
 
 try {
-  const base64 = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64;
-
-  if (!base64) {
-    throw new Error("❌ FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 is NOT SET in Render!");
-  }
-
-  const jsonString = Buffer.from(base64, "base64").toString("utf8");
-  const serviceAccount = JSON.parse(jsonString);
-
-  // -------- Initialize only if no apps exist --------
+  // Prevent "already exists" errors
   if (!admin.apps.length) {
-    app = admin.initializeApp(
-      {
-        credential: admin.credential.cert(serviceAccount),
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-      },
-      "main-backend" // unique name to avoid duplicates
-    );
+    const base64 = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64;
+
+    if (!base64) {
+      throw new Error("Base64 Firebase credentials missing.");
+    }
+
+    const jsonString = Buffer.from(base64, "base64").toString("utf8");
+    const serviceAccount = JSON.parse(jsonString);
+
+    firebaseApp = admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
 
     console.log("🔥 Firebase Admin initialized successfully");
   } else {
-    app = admin.app("main-backend");
+    firebaseApp = admin.app();
+    console.log("🔥 Firebase app reused");
   }
-
-} catch (err) {
-  console.error("❌ Firebase init FAILED:", err.message);
-  process.exit(1); // stop server to avoid hidden issues
+} catch (error) {
+  console.error("❌ Firebase initialization FAILED:", error);
 }
 
-// -------- SAFE EXPORTS --------
-export const bucket = admin.storage().bucket();
-export const firestore = admin.firestore();
-export default admin;
+const db = admin.firestore();   // <--- SAFE now because initializeApp() ran
+const auth = admin.auth();
+
+export { admin, db, auth };
