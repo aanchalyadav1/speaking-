@@ -1,13 +1,14 @@
 // src/components/AudioRecorder.jsx
 import React, { useRef, useState, useEffect } from 'react';
 import CircularTimer from './CircularTimer.jsx';
+import { uploadFile } from '../api/upload.js';
 
 export default function AudioRecorder({
-  onSave,                // async(blob) => {...}
   maxDuration = 60,
   disabled = false,
   allowRetake = true,
-  autoStart = false
+  autoStart = false,
+  onUploaded, // new callback for parent
 }) {
   const [recording, setRecording] = useState(false);
   const [sec, setSec] = useState(0);
@@ -19,8 +20,7 @@ export default function AudioRecorder({
 
   useEffect(() => {
     if (autoStart) start();
-    return () => cleanup();
-    // eslint-disable-next-line
+    return cleanup;
   }, []);
 
   function cleanup() {
@@ -44,10 +44,13 @@ export default function AudioRecorder({
         const url = URL.createObjectURL(blob);
         setBlobUrl(url);
 
-        // call onSave and wait
         setUploading(true);
         try {
-          await onSave(blob);
+          const data = await uploadFile(blob);
+          if (onUploaded) onUploaded(data.url);
+        } catch (err) {
+          console.error(err);
+          alert("Upload failed: " + err.message);
         } finally {
           setUploading(false);
         }
@@ -67,8 +70,8 @@ export default function AudioRecorder({
         });
       }, 1000);
     } catch (err) {
-      console.error('Microphone access error', err);
-      alert('Please allow microphone access.');
+      console.error("Microphone access error", err);
+      alert("Please allow microphone access.");
     }
   }
 
