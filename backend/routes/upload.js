@@ -1,19 +1,15 @@
-// routes/upload.js
 import { Router } from "express";
 import { bucket } from "../firebase.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 
-// Use base64 file upload or buffer from request (no temp files needed)
 router.post("/", async (req, res) => {
   try {
-    const file = req.body.file; // expecting file as base64 string
+    const file = req.body.file; // base64 string
     const originalname = req.body.filename;
 
-    if (!file || !originalname) {
-      return res.status(400).json({ error: "File and filename are required" });
-    }
+    if (!file || !originalname) return res.status(400).json({ error: "File and filename required" });
 
     const buffer = Buffer.from(file, "base64");
     const filename = `${Date.now()}_${originalname}`;
