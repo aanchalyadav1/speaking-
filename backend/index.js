@@ -1,6 +1,5 @@
-// index.js
 import dotenv from "dotenv";
-dotenv.config(); // MUST come first
+dotenv.config();
 
 import express from "express";
 import cors from "cors";
@@ -8,7 +7,6 @@ import fileUpload from "express-fileupload";
 import fs from "fs";
 import path from "path";
 
-// Firebase
 import "./firebase.js";
 import { bucket } from "./firebase.js";
 import { initFirestore } from "./utils/firestore.js";
@@ -19,9 +17,6 @@ import generateRoute from "./routes/generate.js";
 import ttsRoute from "./routes/tts.js";
 import adminRoute from "./routes/admin.js";
 
-// Middleware
-import { verifyFirebaseToken } from "./routes/middlewares.js";
-
 const app = express();
 
 // Middleware
@@ -29,10 +24,10 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 app.use(fileUpload({ useTempFiles: true, tempFileDir: "/tmp/" }));
 
-// Initialize Firestore
+// Firestore init
 await initFirestore();
 
-// Debug: check Firebase bucket
+// Debug Firebase bucket
 console.log("🔥 Firebase Storage Bucket:", bucket?.name);
 
 // Routes
@@ -47,9 +42,7 @@ if (!fs.existsSync(ttsFolder)) fs.mkdirSync(ttsFolder, { recursive: true });
 app.use("/static", express.static(ttsFolder));
 
 // Root
-app.get("/", (req, res) => {
-  res.send("🎤 Speaking Test Backend running!");
-});
+app.get("/", (req, res) => res.send("🎤 Speaking Test Backend running!"));
 
 // Start server
 const PORT = process.env.PORT || 4000;
