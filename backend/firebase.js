@@ -10,28 +10,31 @@ try {
       throw new Error("❌ FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 is missing");
     }
 
-    // Decode Base64 → JSON object
     const jsonString = Buffer.from(base64, "base64").toString("utf8");
     const serviceAccount = JSON.parse(jsonString);
 
-    // Initialize Firebase Admin
+    // Load bucket from environment variable
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
+
+    if (!bucketName) {
+      throw new Error("❌ FIREBASE_STORAGE_BUCKET env variable missing");
+    }
+
     app = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      storageBucket: "speech-app-243b6.appspot.com", // <-- IMPORTANT
+      storageBucket: bucketName,   // ⬅️ IMPORTANT
     });
 
     console.log("🔥 Firebase Admin initialized successfully");
   } else {
     app = admin.app();
-    console.log("🔥 Firebase Admin reused");
+    console.log("🔥 Firebase Admin already initialized");
   }
 } catch (error) {
   console.error("❌ Firebase Admin initialization FAILED:", error);
 }
 
-// ----------------------------------------
-// Initialize Firestore, Auth, Storage
-// ----------------------------------------
+// Now initialize Firestore, Auth, Storage
 let db = null;
 let auth = null;
 let bucket = null;
@@ -39,9 +42,9 @@ let bucket = null;
 try {
   db = admin.firestore();
   auth = admin.auth();
-  bucket = admin.storage().bucket(); // <-- REQUIRED
+  bucket = admin.storage().bucket();  // ⬅️ REQUIRED EXPORT
 } catch (err) {
-  console.error("⚠️ Firestore/Auth/Storage init failed:", err);
+  console.error("⚠️ Firebase service initialization error:", err);
 }
 
 export { admin, db, auth, bucket };
