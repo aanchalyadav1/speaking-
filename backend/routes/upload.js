@@ -1,23 +1,30 @@
+// backend/routes/upload.js
 import { Router } from "express";
+import multer from "multer";
 import { bucket } from "../firebase.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 
-router.post("/", async (req, res) => {
+// Multer memory storage (keeps file in memory)
+const upload = multer({ storage: multer.memoryStorage() });
+
+// POST /api/upload
+// Expects FormData with field "audio" (Blob)
+router.post("/", upload.single("audio"), async (req, res) => {
   try {
-    const file = req.body.file; // base64 string
-    const originalname = req.body.filename;
+    const file = req.file;
 
-    if (!file || !originalname) return res.status(400).json({ error: "File and filename required" });
+    if (!file) {
+      return res.status(400).json({ error: "File is required" });
+    }
 
-    const buffer = Buffer.from(file, "base64");
-    const filename = `${Date.now()}_${originalname}`;
+    const filename = `${Date.now()}_${file.originalname}`;
     const blob = bucket.file(filename);
 
     const blobStream = blob.createWriteStream({
       metadata: {
-        contentType: req.body.mimetype || "application/octet-stream",
+        contentType: file.mimetype,
         metadata: { firebaseStorageDownloadTokens: uuidv4() },
       },
     });
@@ -34,7 +41,9 @@ router.post("/", async (req, res) => {
       res.status(200).json({ url: publicUrl });
     });
 
-    blobStream.end(buffer);
+    // End stream by sending file buffer
+    blobStream.end(file.buffer);
+
   } catch (err) {
     console.error("🔥 Unexpected error:", err);
     res.status(500).json({ error: "Something went wrong" });
