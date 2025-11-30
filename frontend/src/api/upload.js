@@ -1,19 +1,16 @@
-export async function uploadFile(file) {
+export async function uploadFile(blob) {
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append("audio", blob, "response.webm"); // field name MUST be "audio"
 
-  const res = await fetch(
-    `${import.meta.env.VITE_BACKEND_URL}/api/upload`,
-    {
-      method: "POST",
-      body: formData
-    }
-  );
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/upload`, {
+    method: "POST",
+    body: formData
+  });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error("Upload failed: " + err);
+    const errText = await res.text();
+    throw new Error("Upload failed: " + errText);
   }
 
-  return res.json();
+  return res.json(); // { url: "https://..." }
 }
